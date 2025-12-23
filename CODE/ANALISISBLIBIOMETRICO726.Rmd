@@ -28,9 +28,10 @@ library(viridis)
 library(reshape2)
 library(scales)
 
-setwd("/Users/ramymartinez/Desktop/ig/data")  # ajusta si hace falta
+setwd("~/Documents/GitHub/AB/DATA")
 
-files <- list.files(pattern = "\\.bib$", full.names = TRUE)
+files <- list.files(path = "../DATA", full.names = TRUE)
+
 files
 
 # Convierte cada archivo a data frame
@@ -54,6 +55,13 @@ results <- biblioAnalysis(M)
 # Resumen general
 S <- summary(object = results,
              k = 50, pause = FALSE)
+
+C <- S$TCperCountries
+write.csv(C, "../DATA/Country.csv", row.names = FALSE)
+
+
+
+
 
 graph<-plot(x = results, k = 10, pause = FALSE)
 plot(results, k = 10, pause = FALSE)
