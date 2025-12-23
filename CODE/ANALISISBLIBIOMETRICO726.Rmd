@@ -27,6 +27,10 @@ library(gridExtra)
 library(viridis)
 library(reshape2)
 library(scales)
+install.packages(c("rnaturalearth", "rnaturalearthdata", "sf"))  # una sola vez
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
 
 setwd("~/Documents/GitHub/AB/DATA")
 
@@ -59,9 +63,150 @@ S <- summary(object = results,
 C <- S$TCperCountries
 write.csv(C, "../DATA/Country.csv", row.names = FALSE)
 
+# ---- Packages (instala una vez si falta alguno) ----
+# install.packages(c("dplyr","stringr","countrycode","sf","rnaturalearth",
+#                    "rnaturalearthdata","ggplot2","patchwork","scales",
+#                    "gridExtra","ggplotify","viridis"))
+library(dplyr)
+library(stringr)
+library(countrycode)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(ggplot2)
+library(patchwork)
+library(scales)
+library(gridExtra)
+library(ggplotify)
+library(viridis)
 
 
+# --------------------------
+# 1) TABLA: Total citations per country (S$TCperCountries)
+# --------------------------
+C <- as.data.frame(S$TCperCountries)
+names(C) <- make.unique(trimws(names(C)))  # arregla duplicados/espacios
 
+# Columnas esperadas: Country | TC | AAC (pero lo hacemos robusto)
+library(dplyr)
+library(stringr)
+
+C <- as.data.frame(S$TCperCountries)
+names(C) <- make.unique(trimws(names(C)))
+
+pick1 <- function(x, fallback) if (!is.na(x) && length(x) > 0) x else fallback
+
+country_col <- names(C)[1]
+tc_guess  <- names(C)[str_detect(names(C), regex("TC|Total", ignore_case = TRUE))][1]
+aac_guess <- names(C)[str_detect(names(C), regex("AAC|Average", ignore_case = TRUE))][1]
+
+tc_col  <- pick1(tc_guess,  names(C)[2])
+aac_col <- pick1(aac_guess, names(C)[3])
+
+C2 <- C %>%
+  transmute(
+    country = str_squish(.data[[country_col]]),
+    total_citations = as.numeric(.data[[tc_col]]),
+    avg_article_citations = as.numeric(.data[[aac_col]])
+  )
+
+head(C2)
+
+# ISO3 para join limpio con el mapa
+install.packages("countrycode")   # una sola vez
+library(countrycode)
+C2 <- C2 %>%
+  mutate(
+    iso3 = countrycode(country, origin = "country.name", destination = "iso3c")
+  ) %>%
+  mutate(
+    iso3 = case_when(
+      country %in% c("USA", "UNITED STATES", "UNITED STATES OF AMERICA") ~ "USA",
+      country %in% c("UNITED KINGDOM", "ENGLAND", "SCOTLAND", "WALES")    ~ "GBR",
+      TRUE ~ iso3
+    )
+  )
+
+# --------------------------
+# 2) TABLA: Publications per country (S$MostProdCountries)
+# --------------------------
+P <- as.data.frame(S$MostProdCountries)
+names(P) <- make.unique(trimws(names(P)))
+
+p_country_col <- names(P)[1]
+p_docs_col    <- names(P)[2]
+
+P2 <- P %>%
+  transmute(
+    country = str_squish(.data[[p_country_col]]),
+    documents = as.numeric(.data[[p_docs_col]])
+  )
+install.packages(c("rnaturalearth","rnaturalearthdata","sf"))
+library(sf)
+# --------------------------
+# 3) MAPA (A): Total citations
+# --------------------------
+world <- ne_countries(scale = "medium", returnclass = "sf") %>%
+  select(iso3 = iso_a3, name_long, geometry)
+
+map_dat <- world %>% left_join(C2, by = "iso3")
+
+p_map <- ggplot(map_dat) +
+  geom_sf(aes(fill = total_citations), color = NA) +
+  scale_fill_viridis_c(option = "C", trans = "log10", na.value = "grey90", labels = comma) +
+  labs(fill = "Total citations") +
+  theme_void()
+
+# --------------------------
+# 4) BARRAS (B): Top 10 countries by publications
+# --------------------------
+p_pub <- P2 %>%
+  arrange(desc(documents)) %>%
+  slice_head(n = 10) %>%
+  ggplot(aes(x = reorder(country, documents), y = documents)) +
+  geom_col() +
+  coord_flip() +
+  labs(x = NULL, y = "Number of publications") +
+  theme_minimal(base_size = 10)
+
+# --------------------------
+# 5) BARRAS (C): Top 10 countries by total citations
+# --------------------------
+p_cit <- C2 %>%
+  arrange(desc(total_citations)) %>%
+  slice_head(n = 10) %>%
+  ggplot(aes(x = reorder(country, total_citations), y = total_citations)) +
+  geom_col() +
+  coord_flip() +
+  labs(x = NULL, y = "Total citations") +
+  theme_minimal(base_size = 10)
+
+# --------------------------
+# 6) FIGURA COMPUESTA (A,B,C) + Guardar
+# --------------------------
+fig_ABC <- (p_map / (p_pub | p_cit)) + plot_annotation(tag_levels = "A")
+ggsave("Figure_CountryMap_Publications_Citations3.png", fig_ABC,
+       width = 10, height = 7, dpi = 600)
+
+
+# --------------------------
+# 6) FIGURA COMPUESTA (A,B,C) + Guardar  
+# --------------------------
+library(patchwork)
+
+fig_ABC <- (p_map / (p_pub | p_cit)) +
+  plot_layout(heights = c(3.2, 1)) +  # <-- mapa 3.2x más alto que la fila de barras
+  plot_annotation(
+    tag_levels = "A",
+    tag_prefix = "(", tag_suffix = ")"
+  ) &
+  theme(
+    plot.tag = element_text(face = "bold", size = 14),
+    plot.margin = margin(2, 2, 2, 2)
+  )
+
+ggsave("Figure_CountryMap_Publications_Citations5.png", fig_ABC,
+       width = 10, height = 7, dpi = 600)
 
 graph<-plot(x = results, k = 10, pause = FALSE)
 plot(results, k = 10, pause = FALSE)
