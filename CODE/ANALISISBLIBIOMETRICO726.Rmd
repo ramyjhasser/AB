@@ -1,0 +1,449 @@
+---
+title: "inesgeneroab"
+author: "R Jhasser"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Cargar librerías
+library(bibliometrix)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(wordcloud)
+library(RColorBrewer)
+library(Cairo)
+library(tidyverse)
+library(kableExtra)
+library(plotly)
+library(networkD3)
+library(igraph)
+library(corrplot)
+library(gridExtra)
+library(viridis)
+library(reshape2)
+library(scales)
+
+setwd("/Users/ramymartinez/Desktop/ig/data")  # ajusta si hace falta
+
+files <- list.files(pattern = "\\.bib$", full.names = TRUE)
+files
+
+# Convierte cada archivo a data frame
+bib_list <- lapply(files, function(f) {
+  convert2df(file = f, dbsource = "isi", format = "bibtex")
+})
+
+# Une todos los data frames y elimina duplicados
+M <- mergeDbSources(bib_list, remove.duplicated = TRUE)
+
+# Unir todos los dataframes en uno solo
+M <- mergeDbSources(bib_list, remove.duplicated = TRUE)
+
+# Confirmar cuántos registros tienes
+nrow(M)
+
+# Crear el objeto de análisis bibliométrico
+results <- biblioAnalysis(M)
+
+
+# Resumen general
+S <- summary(object = results,
+             k = 50, pause = FALSE)
+
+graph<-plot(x = results, k = 10, pause = FALSE)
+plot(results, k = 10, pause = FALSE)
+
+
+graph$MostProdAuthors
+graph$MostProdCountries
+graph$AnnualScientProd
+graph$AverArtCitperYear
+graph$AverTotCitperYear
+
+
+
+
+
+# ---- FIG 1: Producción anual (desde DATA)
+ap <- M %>%
+  mutate(PY = as.integer(PY)) %>%
+  filter(!is.na(PY)) %>%
+  count(PY, name = "Articles") %>%
+  arrange(PY)
+
+p1 <- ggplot(ap, aes(PY, Articles)) +
+  geom_col() + geom_line() + geom_point() +
+  labs(title = "Annual Scientific Production", x = "Year", y = "Documents") +
+  theme_minimal(base_size = 13)
+
+print(p1)
+ggsave("ines_figs/Fig1_AnnualProduction.png", p1, width=10, height=5, dpi=350)
+
+library(ggplot2)
+
+dir.create("ines_figs", showWarnings = FALSE)
+
+src <- as.data.frame(results$Sources)     # columnas: SO y Freq
+src <- src[1:10, , drop = FALSE]
+names(src) <- c("Source","Articles")
+
+p2 <- ggplot(src, aes(x = reorder(Source, Articles), y = Articles)) +
+  geom_col() + coord_flip() +
+  labs(title = "Most Relevant Sources (Top 10)", x = NULL, y = "Documents") +
+  theme_minimal(base_size = 13)
+
+p2
+ggsave("ines_figs/Fig2_TopSources.png", p2, width=9, height=5, dpi=350)
+
+#PRODUCTIVE COUNTRY 
+library(ggplot2)
+library(dplyr)
+
+ctry <- as.data.frame(S$MostProdCountries)[1:10, , drop=FALSE]
+
+# Asegurar nombres (por si vienen raros)
+if (!"Country"  %in% names(ctry)) names(ctry)[1] <- "Country"
+if (!"Articles" %in% names(ctry)) names(ctry)[2] <- "Articles"
+
+# Convertir tipos (esto arregla el error)
+ctry$Country  <- as.character(ctry$Country)
+ctry$Articles <- ctry$Articles %>% unlist() %>% as.character()
+ctry$Articles <- as.numeric(gsub("[^0-9.]", "", ctry$Articles))  # limpia símbolos
+
+# Plot
+p3 <- ggplot(ctry, aes(x = reorder(Country, Articles), y = Articles)) +
+  geom_col() + coord_flip() +
+  labs(title = "Most Productive Countries (Top 10)", x = NULL, y = "Documents") +
+  theme_minimal(base_size = 13)
+
+p3
+ggsave("ines_figs/Fig3_TopCountries.png", p3, width=9, height=5, dpi=350)
+
+#KEY WORD 
+library(ggplot2)
+
+kw <- as.data.frame(S$MostRelKeywords)
+
+de <- data.frame(
+  Keyword  = kw[[1]],
+  Articles = as.numeric(gsub("[^0-9.]", "", kw[[2]]))
+)
+
+p4 <- ggplot(de, aes(reorder(Keyword, Articles), Articles)) +
+  geom_col() + coord_flip() +
+  theme_minimal(base_size=13) +
+  labs(title="Top Author Keywords (DE) (Top 10)", x=NULL, y="Documents")
+
+p4
+ggsave("ines_figs/Fig4_TopKeywords_DE.png", p4, width=9, height=5, dpi=350)
+
+id <- data.frame(
+  Keyword  = kw[[3]],
+  Articles = as.numeric(gsub("[^0-9.]", "", kw[[4]]))
+)
+
+p5 <- ggplot(id, aes(reorder(Keyword, Articles), Articles)) +
+  geom_col() + coord_flip() +
+  theme_minimal(base_size=13) +
+  labs(title="Top Keywords Plus (ID) (Top 10)", x=NULL, y="Documents")
+
+p5
+ggsave("ines_figs/Fig5_TopKeywords_ID.png", p5, width=9, height=5, dpi=350)
+
+
+# ===== FIG 6: Most Cited Papers (Top 10) =====
+cp <- as.data.frame(S$MostCitedPapers)[1:10, , drop=FALSE]
+
+# En tu summary suele venir "Paper" y "TC"
+# Forzamos columnas por posición si cambian nombres:
+if (!"Paper" %in% names(cp)) cp$Paper <- cp[[1]]
+if (!"TC"    %in% names(cp)) cp$TC    <- cp[["TC"]]
+
+# asegurar TC numérico
+cp$TC <- as.numeric(gsub("[^0-9.]", "", as.character(cp$TC)))
+
+p6 <- ggplot(cp, aes(x = reorder(Paper, TC), y = TC)) +
+  geom_col() + coord_flip() +
+  labs(title="Most Cited Papers (Top 10)", x=NULL, y="Total Citations (TC)") +
+  theme_minimal(base_size = 13)
+
+p6
+ggsave("ines_figs/Fig6_MostCitedPapers.png", p6, width=12, height=6, dpi=350)
+
+dir.create("ines_figs", showWarnings = FALSE)
+write.csv(S$MainInformationDF, "ines_figs/Table1_MainInformation.csv", row.names = FALSE)
+
+
+library(bibliometrix)
+
+library(bibliometrix)
+
+NetAuth <- biblioNetwork(M, analysis="collaboration", network="authors", sep=";")
+
+dir.create("ines_figs/layout_tests", recursive = TRUE, showWarnings = FALSE)
+
+types <- c("fruchterman","kamada","lgl","mds","circle","grid","random")
+
+for (tp in types) {
+  outfile <- paste0("ines_figs/layout_tests/AuthorNet_", tp, ".png")
+  message("Saving: ", outfile)
+
+  try({
+    png(outfile, width=2200, height=1400, res=250)
+    networkPlot(NetAuth,
+                n = 40,
+                type = tp,
+                size = TRUE,
+                labelsize = 0.5,
+                remove.isolates = TRUE,
+                Title = paste("Author collaboration network -", tp))
+    dev.off()
+  }, silent = TRUE)
+}
+dev.off()
+
+png("ines_figs/AuthorNet_kamada_ultra.png", width=2400, height=1500, res=300)
+networkPlot(NetAuth, n=25, type="kamada", size=TRUE, labelsize=0.7,
+            remove.isolates=TRUE, Title="Author collaboration network (ultra clear)")
+
+
+library(bibliometrix)
+
+# crea el campo AU_CO a partir de C1/RP
+M2 <- metaTagExtraction(M, Field = "AU_CO", sep = ";")
+
+# chequeo rápido
+table(is.na(M2$AU_CO))
+head(M2$AU_CO, 10)
+
+library(bibliometrix)
+
+dir.create("ines_figs", showWarnings = FALSE)
+
+# filtra el único NA por seguridad
+M2_ok <- M2[!is.na(M2$AU_CO) & trimws(M2$AU_CO) != "", ]
+
+NetC <- biblioNetwork(M2_ok, analysis="collaboration", network="countries", sep=";")
+
+png("ines_figs/Fig_CountryCollabNetwork_kamada.png", width=2200, height=1400, res=250)
+networkPlot(NetC, n=50, type="fruchterman",
+            size=TRUE, labelsize=0.7,
+            remove.isolates=TRUE,
+            Title="Country collaboration network")
+
+# Usa DE (Author Keywords). Si DE está pobre, cambia field="ID".
+png("ines_figs/Fig_ThematicMap.png", width = 1600, height = 1100, res = 200)
+thematicMap(M, field = "DE", n = 250, minfreq = 5, stemming = FALSE, size = 0.5, n.labels = 1)
+dev.off()
+
+library(dplyr)
+library(ggplot2)
+
+dir.create("ines_figs", showWarnings = FALSE)
+
+# texto combinado (robusto)
+txt <- paste(
+  ifelse(is.na(M$TI), "", M$TI),
+  ifelse(is.na(M$AB), "", M$AB),
+  ifelse(is.na(M$DE), "", M$DE),
+  ifelse(is.na(M$ID), "", M$ID)
+)
+
+# detectar menciones
+female <- grepl("\\bfemales?\\b", txt, ignore.case = TRUE)
+male   <- grepl("\\bmales?\\b",   txt, ignore.case = TRUE)
+
+# clasificar
+sex_focus <- dplyr::case_when(
+  female & !male ~ "Female only",
+  male & !female ~ "Male only",
+  female & male  ~ "Both sexes",
+  TRUE           ~ "Not specified"
+)
+
+# tabla + plot
+df_sex <- as.data.frame(table(sex_focus)) %>%
+  rename(Category = sex_focus, Documents = Freq) %>%
+  arrange(desc(Documents))
+
+p_sex <- ggplot(df_sex, aes(x = reorder(Category, Documents), y = Documents)) +
+  geom_col() + coord_flip() +
+  labs(title = "Sex reporting proxy (mentions in TI/AB/DE/ID)",
+       x = NULL, y = "Documents") +
+  theme_minimal(base_size = 13)
+
+p_sex
+ggsave("ines_figs/Fig_SexMentionsProxy.png", p_sex, width=9, height=5, dpi=350)
+
+df_sex
+
+trend_df2 <- trend_df %>% filter(Freq >= 2)
+
+p_bubble2 <- ggplot(trend_df2, aes(x = PY, y = DE, size = Freq)) +
+  geom_point(alpha = 0.75) +
+  labs(title = "Trend Topics (DE) - Top 20 (Freq ≥ 2/year)",
+       x = "Year", y = "Term") +
+  theme_minimal(base_size = 12)
+
+p_bubble2
+ggsave("ines_figs/Fig_TrendTopics_bubble_clean.png", p_bubble2, width=12, height=8, dpi=350)
+
+
+library(dplyr)
+library(ggplot2)
+library(stringr)
+
+dir.create("ines_figs", showWarnings = FALSE)
+
+# Texto + año (usa TI/AB/DE/ID)
+df_sex_year <- M %>%
+  transmute(
+    PY  = as.integer(PY),
+    txt = paste(
+      ifelse(is.na(TI), "", TI),
+      ifelse(is.na(AB), "", AB),
+      ifelse(is.na(DE), "", DE),
+      ifelse(is.na(ID), "", ID)
+    )
+  ) %>%
+  filter(!is.na(PY), PY >= 2008) %>%
+  mutate(
+    female = str_detect(txt, regex("\\bfemales?\\b", ignore_case = TRUE)),
+    male   = str_detect(txt, regex("\\bmales?\\b",   ignore_case = TRUE)),
+    Category = case_when(
+      female & !male ~ "Female only",
+      male & !female ~ "Male only",
+      female & male  ~ "Both sexes",
+      TRUE           ~ "Not specified"
+    )
+  ) %>%
+  count(PY, Category, name="Documents") %>%
+  group_by(PY) %>%
+  mutate(Percent = Documents / sum(Documents) * 100) %>%
+  ungroup()
+
+# Plot en porcentaje (mejor para comparar años)
+p_sex_year <- ggplot(df_sex_year, aes(x = PY, y = Percent, group = Category)) +
+  geom_line() +
+  geom_point(size = 1.8) +
+  labs(title = "Sex reporting proxy over time (TI/AB/DE/ID)",
+       x = "Year", y = "Percent of documents") +
+  theme_minimal(base_size = 13)
+
+p_sex_year
+ggsave("ines_figs/Fig_SexProxy_overTime.png", p_sex_year, width=10, height=6, dpi=350)
+
+library(dplyr)
+library(ggplot2)
+
+
+# 1) Conteo anual (records por año)
+ap <- M %>%
+  mutate(PY = as.numeric(PY)) %>%
+  filter(!is.na(PY)) %>%
+  count(PY, name = "Records") %>%
+  arrange(PY)
+
+# (opcional) completar años faltantes dentro del rango
+ap <- ap %>%
+  tidyr::complete(PY = seq(min(PY), max(PY), by = 1), fill = list(Records = 0))
+
+# 2) Plot tipo “Figure 1. Articles published per year”
+p_pub <- ggplot(ap, aes(x = PY, y = Records)) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.2) +
+  geom_smooth(method = "lm", se = FALSE, linetype = "dotted", linewidth = 0.9) +
+  labs(
+    title = NULL,
+    x = "Publication Year",
+    y = "Records"
+  ) +
+  theme_classic(base_size = 16) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
+  )
+
+p_pub
+
+# 3) Guardar
+dir.create("ines_figs", showWarnings = FALSE)
+ggsave("ines_figs/Fig_PubsPerYear_PaperStyle.png", p_pub, width = 10, height = 6, dpi = 350)
+
+library(bibliometrix)
+
+# si tu dataset se llama merged_bib y no M:
+if (!exists("M")) M <- merged_bib
+
+dir.create("ines_figs", showWarnings = FALSE)
+
+# --- Red (matriz) de coautoría
+png("ines_figs/Fig_AuthorCollaboration.png", width = 2600, height = 1900, res = 300)
+
+png("ines_figs/Fig_AuthorCollaboration_clean.png", width = 2600, height = 1900, res = 300)
+
+# asumiendo que ya tienes g, lay (kamada), y comunidades en V(g)$comm
+
+# install.packages(c("wordcloud2", "dplyr"))
+library(dplyr)
+library(wordcloud2)
+
+rk <- S$MostRelKeywords
+
+# 1) Arregla nombres duplicados (Articles -> Articles, Articles.1)
+names(rk) <- make.unique(trimws(names(rk)))
+
+names(rk)  # para verificar
+
+# 2) Construye dataframes para wordcloud
+kw_de <- data.frame(
+  word = rk[[1]],
+  freq = as.numeric(rk[[2]])
+) %>% 
+  filter(!is.na(word), !is.na(freq), freq > 1)
+
+kw_id <- data.frame(
+  word = rk[[3]],
+  freq = as.numeric(rk[[4]])
+) %>% 
+  filter(!is.na(word), !is.na(freq), freq > 1)
+
+# 3) Wordclouds
+wordcloud2(kw_de, size = 0.5, rotateRatio = 0, shuffle = FALSE)
+wordcloud2(kw_id, size = 0.7, rotateRatio = 0, shuffle = FALSE)
+
+
+
+
+```
+
+
+knitr::opts_chunk$set(echo = TRUE)
+
+
+
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
